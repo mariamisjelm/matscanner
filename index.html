@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>Matskanner – avslør ultraprosessert mat</title>
+<script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f7f6;
+    --card: #ffffff;
+    --text: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --brand: #0f766e;
+    --brand-2: #14b8a6;
+    --high: #dc2626;
+    --moderate: #ea580c;
+    --marker: #ca8a04;
+    --safe: #16a34a;
+    --neutral: #64748b;
+    --radius: 18px;
+    --shadow: 0 6px 24px rgba(15, 23, 42, .07);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header {
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff;
+    padding: calc(22px + env(safe-area-inset-top)) 20px 56px;
+  }
+  header h1 { margin: 0; font-size: 1.6rem; letter-spacing: -.02em; }
+  header p { margin: 4px 0 0; opacity: .9; font-size: .95rem; }
+  main { max-width: 640px; margin: -36px auto 0; padding: 0 14px 40px; }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .tabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    background: #eef2f1; padding: 5px; border-radius: 14px; margin-bottom: 16px;
+  }
+  .tab {
+    border: 0; background: transparent; padding: 11px 8px; border-radius: 10px;
+    font: inherit; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .tab.active { background: #fff; color: var(--brand); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; border: 0; border-radius: 14px; padding: 14px 16px;
+    font: inherit; font-weight: 650; font-size: 1rem; cursor: pointer;
+    background: var(--brand); color: #fff; transition: transform .08s, opacity .2s;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.secondary { background: #e6f4f2; color: var(--brand); }
+  .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .stack > * + * { margin-top: 10px; }
+  label.btn input { display: none; }
+  input[type=text], textarea {
+    width: 100%; font: inherit; padding: 13px 14px; border-radius: 12px;
+    border: 1px solid var(--line); background: #fbfcfc; color: var(--text);
+  }
+  textarea { min-height: 130px; resize: vertical; font-size: .92rem; }
+  input:focus, textarea:focus { outline: 2px solid var(--brand-2); border-color: transparent; }
+  #reader { border-radius: 14px; overflow: hidden; background: #0b1220; display: none; }
+  #reader.on { display: block; }
+  #reader video { width: 100% !important; display: block; }
+  .hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; }
+  .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .8rem; margin: 14px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #preview { width: 100%; max-height: 260px; object-fit: contain; border-radius: 12px; background: #f1f5f9; display: none; }
+  .progress { height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; display: none; }
+  .progress > div { height: 100%; width: 0; background: var(--brand-2); transition: width .2s; }
+  .status { font-size: .9rem; color: var(--muted); min-height: 1.2em; }
+  .status.error { color: var(--high); }
+
+  /* Resultat */
+  #result { display: none; }
+  .product { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+  .product img { width: 64px; height: 64px; object-fit: contain; border-radius: 12px; background: #f1f5f9; }
+  .product h2 { margin: 0; font-size: 1.15rem; }
+  .product small { color: var(--muted); }
+  .summary { display: flex; gap: 18px; align-items: center; }
+  .ring { position: relative; width: 132px; height: 132px; flex: none; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring .num { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  .ring .num b { font-size: 2.1rem; line-height: 1; }
+  .ring .num span { font-size: .78rem; color: var(--muted); }
+  .verdict { font-size: 1.05rem; font-weight: 700; padding: 6px 12px; border-radius: 99px; display: inline-block; }
+  .meta { margin-top: 8px; font-size: .9rem; color: var(--muted); }
+  .meta b { color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .chip { font-size: .8rem; font-weight: 600; padding: 5px 10px; border-radius: 99px; }
+  .lvl-high { --c: var(--high); }
+  .lvl-moderate { --c: var(--moderate); }
+  .lvl-marker { --c: var(--marker); }
+  .lvl-safe { --c: var(--safe); }
+  .lvl-neutral, .lvl-none { --c: var(--neutral); }
+  .chip, .verdict { background: color-mix(in srgb, var(--c) 13%, white); color: var(--c); }
+  h3 { font-size: 1rem; margin: 0 0 10px; }
+  .ing { list-style: none; margin: 0; padding: 0; }
+  .ing li {
+    padding: 10px 12px; border-radius: 12px; margin-bottom: 6px;
+    border-left: 4px solid var(--c); background: #f8fafc;
+  }
+  .ing li.lvl-none { border-left-color: #cbd5e1; }
+  .ing li.lvl-high, .ing li.lvl-moderate, .ing li.lvl-marker { background: color-mix(in srgb, var(--c) 7%, white); }
+  .ing .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .ing .name { font-weight: 550; }
+  .ing .tag { font-size: .72rem; font-weight: 700; color: var(--c); white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
+  .ing .why { font-size: .84rem; color: #475569; margin-top: 4px; }
+  .ing .why b { color: var(--text); }
+  .src { font-size: .72rem; color: var(--muted); }
+  .history { list-style: none; padding: 0; margin: 0; }
+  .history li {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 10px 2px; border-bottom: 1px solid var(--line); cursor: pointer;
+  }
+  .history li:last-child { border-bottom: 0; }
+  .history .h-name { font-weight: 600; font-size: .95rem; }
+  .history .h-sub { font-size: .8rem; color: var(--muted); }
+  .disclaimer { font-size: .78rem; color: var(--muted); text-align: center; padding: 0 10px; }
+  .legend { display: grid; gap: 8px; font-size: .86rem; }
+  .legend div { display: flex; gap: 8px; align-items: flex-start; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-top: 6px; flex: none; }
+  details summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Matskanner</h1>
+  <p>Scan strekkoden eller innholdslisten – se hvor mange ingredienser som er skadelige.</p>
+</header>
+
+<main>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="barcode" role="tab">Strekkode</button>
+    <button class="tab" data-tab="label" role="tab">Innholdsliste</button>
+  </div>
+
+  <section class="card panel active" id="panel-barcode">
+    <div class="stack">
+      <div id="reader"></div>
+      <button class="btn" id="btnCamera">Start kamera og scan strekkode</button>
+      <label class="btn secondary">
+        Ta bilde av strekkoden
+        <input type="file" id="barcodeFile" accept="image/*" capture="environment">
+      </label>
+    </div>
+    <div class="divider">eller skriv inn</div>
+    <form class="row" id="manualForm">
+      <input type="text" id="manualCode" inputmode="numeric" placeholder="f.eks. 7038010069307" autocomplete="off">
+      <button class="btn" style="flex:0 0 90px">Søk</button>
+    </form>
+    <p class="hint">Produktdata hentes fra den åpne databasen Open Food Facts. Finnes ikke produktet, kan du fotografere innholdslisten i stedet.</p>
+    <div id="hidden-reader" style="display:none"></div>
+  </section>
+
+  <section class="card panel" id="panel-label">
+    <div class="stack">
+      <label class="btn">
+        Ta bilde av innholdslisten
+        <input type="file" id="labelFile" accept="image/*" capture="environment">
+      </label>
+      <img id="preview" alt="Bilde av innholdsliste">
+      <div class="progress" id="ocrProgress"><div></div></div>
+      <textarea id="ingredientText" placeholder="Teksten fra bildet havner her. Du kan også lime inn eller skrive innholdslisten selv, f.eks.: Hvetemel, vann, glukose-fruktosesirup, emulgator (E471), konserveringsmiddel (E202)…"></textarea>
+      <button class="btn" id="btnAnalyze">Analyser innholdslisten</button>
+    </div>
+    <p class="hint">Tips: hold telefonen rett over teksten, sørg for godt lys og at hele listen er i bildet. Rett gjerne opp feil i teksten før du analyserer.</p>
+  </section>
+
+  <p class="status" id="status"></p>
+
+  <section class="card" id="result"></section>
+
+  <section class="card">
+    <details>
+      <summary>Hva betyr fargene?</summary>
+      <div class="legend" style="margin-top:12px">
+        <div class="lvl-high"><span class="dot"></span><span><b>Skadelig</b> – stoffer med sterk dokumentasjon på helserisiko, eller som er forbudt/klassifisert som (mulig) kreftfremkallende.</span></div>
+        <div class="lvl-moderate"><span class="dot"></span><span><b>Betenkelig</b> – stoffer der forskning tyder på negative effekter (tarmflora, hjerte-kar, betennelse m.m.).</span></div>
+        <div class="lvl-marker"><span class="dot"></span><span><b>Ultraprosessert-markør</b> – industrielle ingredienser som er typiske for ultraprosessert mat (NOVA 4), men ikke nødvendigvis skadelige alene.</span></div>
+        <div class="lvl-safe"><span class="dot"></span><span><b>Ufarlig</b> – tilsetningsstoffer som regnes som trygge (f.eks. C-vitamin, sitronsyre, pektin).</span></div>
+      </div>
+      <p class="hint">«Skadelige» i telleren = skadelig + betenkelig. Allergener vurderes ikke.</p>
+    </details>
+  </section>
+
+  <section class="card" id="historyCard" style="display:none">
+    <div class="row" style="align-items:center;margin-bottom:6px">
+      <h3 style="margin:0">Tidligere scanninger</h3>
+      <button class="btn ghost" id="btnClear" style="flex:0 0 auto;width:auto;padding:6px 12px;font-size:.85rem">Tøm</button>
+    </div>
+    <ul class="history" id="history"></ul>
+  </section>
+
+  <p class="disclaimer">Matskanner gir veiledende informasjon basert på offentlig tilgjengelig forskning (EFSA, IARC, NOVA-klassifiseringen) og er ikke medisinske råd.</p>
+</main>
+
+<!-- Analysemotor (ingen DOM-avhengigheter) -->
+<script id="engine">
+const LEVELS = {
+  high:     { label: 'Skadelig',               rank: 4 },
+  moderate: { label: 'Betenkelig',             rank: 3 },
+  marker:   { label: 'Ultraprosessert-markør', rank: 2 },
+  safe:     { label: 'Ufarlig',                rank: 1 },
+  neutral:  { label: 'Tilsetningsstoff',       rank: 0 },
+  none:     { label: '',                       rank: -1 },
+};
+
+const ADDITIVES = {};
+const GROUPS = [];
+
+function range(a, b, skip = []) {
+  const out = [];
+  for (let i = a; i <= b; i++) if (!skip.includes(i)) out.push('E' + i);
+  return out;
+}
+
+function add(codes, name, level, why, terms = []) {
+  const group = { id: GROUPS.length, codes, name, level, why, terms: terms.map(t => t.toLowerCase()) };
+  GROUPS.push(group);
+  for (const c of codes) ADDITIVES[c] = group;
+  return group;
+}
+
+const AZO_WHY = 'Syntetisk fargestoff knyttet til hyperaktivitet og konsentrasjonsvansker hos barn (Southampton-studien). Må merkes med advarsel i EU.';
+
+// ---------- Skadelig ----------
+add(['E102'], 'Tartrazin', 'high', AZO_WHY, ['tartrazin']);
+add(['E104'], 'Kinolingult', 'high', AZO_WHY, ['kinolingul', 'quinoline yellow', 'kinolingult']);
+add(['E110'], 'Paraoransje (Sunset Yellow)', 'high', AZO_WHY, ['paraoransje', 'sunset yellow', 'paraorange']);
+add(['E122'], 'Azorubin', 'high', AZO_WHY, ['azorubin', 'karmoisin', 'carmoisine']);
+add(['E124'], 'Ponceau 4R', 'high', AZO_WHY, ['ponceau', 'nykockin', 'cochenillerød a']);
+add(['E129'], 'Allurarødt', 'high', AZO_WHY, ['allurarød', 'allura red', 'allurarött']);
+add(['E123'], 'Amarant', 'high', 'Syntetisk azofargestoff som er forbudt i USA etter mistanke om kreftfremkallende effekt.', ['amarant']);
+add(['E127'], 'Erytrosin', 'high', 'Jodholdig fargestoff som påvirker skjoldbruskkjertelen og ga svulster i dyreforsøk. Forbudt i mat i USA.', ['erytrosin', 'erythrosine']);
+add(['E128'], 'Rød 2G', 'high', 'Forbudt i EU siden 2007 – omdannes til et mulig kreftfremkallende stoff (anilin).', ['rød 2g', 'red 2g']);
+add(['E171'], 'Titandioksid', 'high', 'Forbudt i mat i EU siden 2022 fordi EFSA ikke kunne utelukke skade på arvestoffet (DNA).', ['titandioksid', 'titanium dioxide', 'titandioxid']);
+add(['E249', 'E250'], 'Nitritt', 'high', 'Kan danne kreftfremkallende nitrosaminer. Bearbeidet kjøtt med nitritt er klassifisert som kreftfremkallende (IARC gruppe 1).', ['nitrit', 'nitrite']);
+add(['E251', 'E252'], 'Nitrat', 'high', 'Omdannes til nitritt i kroppen og kan danne kreftfremkallende nitrosaminer.', ['nitrat']);
+add(['E319'], 'TBHQ', 'high', 'Syntetisk antioksidant fra petroleum. Dyreforsøk viser effekter på immunsystemet.', ['tbhq', 'butylhydrokinon', 'butylhydroquinone']);
+add(['E320'], 'BHA (butylhydroksyanisol)', 'high', 'Klassifisert som mulig kreftfremkallende (IARC 2B) og mistenkt hormonforstyrrende.', ['bha', 'butylhydroksyanisol', 'butylated hydroxyanisole', 'butylhydroxianisol']);
+add(['E321'], 'BHT (butylhydroksytoluen)', 'high', 'Syntetisk antioksidant som er mistenkt hormonforstyrrende.', ['bht', 'butylhydroksytoluen', 'butylated hydroxytoluene', 'butylhydroxitoluen']);
+add(['E951'], 'Aspartam', 'high', 'Kunstig søtstoff klassifisert som mulig kreftfremkallende (IARC 2B, 2023).', ['aspartam']);
+add(['E962'], 'Aspartam-acesulfamsalt', 'high', 'Inneholder aspartam, klassifisert som mulig kreftfremkallende (IARC 2B, 2023).', ['aspartam-acesulfam']);
+add([], 'Delvis herdet fett', 'high', 'Kilde til industrielt transfett, som øker risikoen for hjerte-kar-sykdom kraftig.',
+  ['delvis herdet', 'delvis hydrogenert', 'partially hydrogenated', 'delvis härdad', 'delvist hærdet', 'delvis hærdet']);
+
+// ---------- Betenkelig ----------
+const SYNTH_COLOR = 'Syntetisk fargestoff uten næringsverdi. Brukes for å gjøre bearbeidet mat mer fristende.';
+add(['E132'], 'Indigotin', 'moderate', SYNTH_COLOR, ['indigotin', 'indigokarmin']);
+add(['E133'], 'Briljantblå', 'moderate', SYNTH_COLOR, ['briljantblå', 'brilliant blue', 'briljantblått']);
+add(['E142'], 'Grønn S', 'moderate', SYNTH_COLOR, ['grønn s', 'green s', 'grön s']);
+add(['E151'], 'Briljantsvart', 'moderate', SYNTH_COLOR, ['briljantsvart', 'brilliant black']);
+add(['E155'], 'Brun HT', 'moderate', SYNTH_COLOR, ['brun ht', 'brown ht']);
+add(['E180'], 'Litolrubin', 'moderate', SYNTH_COLOR, ['litolrubin', 'lithol rubine']);
+add(['E150C', 'E150D'], 'Ammoniakk-karamell', 'moderate', 'Karamellfarge laget med ammoniakk. Kan inneholde 4-MEI, klassifisert som mulig kreftfremkallende (IARC 2B).',
+  ['ammoniakkaramell', 'ammoniakk-karamell', 'ammoniumsulfittkaramell', 'sulfittammoniakkaramell', 'ammonia caramel', 'ammoniakkaramel']);
+add(range(210, 213), 'Benzoater', 'moderate', 'Konserveringsmiddel som kan danne kreftfremkallende benzen sammen med C-vitamin, og er knyttet til hyperaktivitet hos barn.',
+  ['benzoat', 'benzoate', 'benzosyre', 'benzoic', 'bensoat', 'bensoesyra', 'benzoesyre']);
+add(range(220, 228, [225, 229]), 'Sulfitter', 'moderate', 'Konserveringsmiddel som bryter ned vitamin B1 og kan utløse astmalignende reaksjoner.',
+  ['sulfit', 'sulphite', 'svoveldioksid', 'sulphur dioxide', 'sulfur dioxide', 'svaveldioxid', 'svovldioxid', 'disulfit', 'metabisulfi']);
+add(range(310, 312), 'Gallater', 'moderate', 'Syntetiske antioksidanter som er mistenkt hormonforstyrrende.', ['gallat', 'gallate']);
+add([...range(338, 341), 'E343', ...range(450, 452)], 'Fosfater', 'moderate', 'Tilsatt fosfat tas lett opp i kroppen. Høyt inntak knyttes til belastning på nyrer, blodårer og hjerte.',
+  ['fosfat', 'phosphate', 'fosforsyre', 'phosphoric', 'fosforsyra']);
+add(['E407', 'E407A'], 'Karragenan', 'moderate', 'Fortykningsmiddel fra tang som i dyre- og cellestudier gir betennelse i tarmen.', ['karragen', 'carrageen']);
+add(range(432, 436), 'Polysorbater', 'moderate', 'Emulgator som i studier har skadet tarmens slimlag og tarmflora, og gitt lavgradig betennelse.', ['polysorbat', 'polysorbate']);
+add(['E466'], 'Karboksymetylcellulose', 'moderate', 'Emulgator som i en klinisk studie (2021) endret tarmfloraen negativt og forstyrret tarmens beskyttende slimlag.',
+  ['karboksymetylcellulose', 'carboxymethyl', 'cellulosegummi', 'cellulose gum', 'karboximetylcellulosa', 'karboxymetylcellulosa']);
+add(['E471'], 'Mono- og diglyserider av fettsyrer', 'moderate', 'Emulgator. Den franske NutriNet-Santé-studien (100 000 personer) knyttet høyt inntak til økt risiko for hjerte-kar-sykdom og kreft.',
+  ['diglyserid', 'diglycerid', 'monoglyserid', 'monoglycerid']);
+add(['E481', 'E482'], 'Stearoyl-laktylater', 'moderate', 'Syntetisk emulgator som i laboratoriestudier påvirker tarmfloraen negativt.', ['stearoyl', 'laktylat', 'lactylate']);
+add(['E950'], 'Acesulfam K', 'moderate', 'Kunstig søtstoff. Store observasjonsstudier knytter kunstige søtstoffer til økt risiko for hjerte-kar-sykdom.', ['acesulfam']);
+add(['E952'], 'Cyklamat', 'moderate', 'Kunstig søtstoff som er forbudt i USA.', ['cyklamat', 'cyclamate', 'syklamat']);
+add(['E954'], 'Sakkarin', 'moderate', 'Kunstig søtstoff som kan påvirke tarmflora og blodsukkerregulering.', ['sakkarin', 'saccharin', 'sackarin']);
+add(['E955'], 'Sukralose', 'moderate', 'Kunstig søtstoff. Nedbrytningsproduktet sukralose-6-acetat viste skade på arvestoff i laboratoriestudier (2023).', ['sukralose', 'sucralose', 'sukralos']);
+add(['E961', 'E969'], 'Neotam/advantam', 'moderate', 'Svært potente kunstige søtstoffer med begrenset langtidsdokumentasjon.', ['neotam', 'advantam']);
+add(['E968'], 'Erytritol', 'moderate', 'Søtstoff. En studie i Nature Medicine (2023) knyttet høye blodnivåer til økt risiko for blodpropp og hjerteinfarkt.', ['erytritol', 'erythritol']);
+add(range(620, 625), 'Glutamater (MSG)', 'moderate', 'Smaksforsterker som gjør maten ekstra «spiselig» og bidrar til overspising. Klassisk tegn på ultraprosessert mat.',
+  ['glutamat', 'glutamate', 'msg']);
+add([...range(626, 635)], 'Ribonukleotider', 'moderate', 'Smaksforsterkere som brukes sammen med glutamat for å forsterke smak i industrimat.', ['ribonukleotid', 'ribonucleotide', 'inosinat', 'guanylat', 'inosinate', 'guanylate']);
+add(['E173', 'E520', 'E521', 'E522', 'E523', 'E541', 'E554', 'E555', 'E556', 'E559'], 'Aluminiumforbindelser', 'moderate', 'Aluminium kan hope seg opp i kroppen; høyt inntak kan påvirke nervesystem og skjelett.', ['aluminium']);
+add([], 'Glukose-fruktosesirup', 'moderate', 'Billig, raffinert sukkersirup. Høyt inntak knyttes til fettlever, insulinresistens og overvekt.',
+  ['glukose-fruktosesirup', 'fruktose-glukosesirup', 'fruktosesirup', 'glucose-fructose', 'fructose-glucose', 'high fructose', 'isoglukose',
+   'maissirup', 'corn syrup', 'glukos-fruktossirap', 'fruktos-glukossirap', 'majssirap', 'glukose-fruktosesirap']);
+add([], 'Herdet fett', 'moderate', 'Industrielt herdet fett. Fullherdet fett er mettet fett laget i fabrikk – typisk for ultraprosessert mat.',
+  ['herdet', 'hydrogenert', 'hydrogenated', 'härdad', 'hærdet']);
+add([], 'Røykaroma', 'moderate', 'EU fases ut de fleste røykaromaer fordi EFSA ikke kunne utelukke at de skader arvestoffet.',
+  ['røykaroma', 'røyk-aroma', 'smoke flavour', 'smoke flavor', 'rökarom', 'røgaroma', 'flytende røyk', 'liquid smoke']);
+add([], 'Mekanisk utbeinet kjøtt', 'moderate', 'Kjøttmasse presset ut av beinrester under høyt trykk – lav kvalitet og typisk for ultraprosessert mat.',
+  ['mekanisk utbenet', 'mekanisk utbeinet', 'mechanically separated', 'maskinurbenat', 'mekanisk separert', 'mekanisk separeret']);
+
+// ---------- Ultraprosessert-markører ----------
+add(['E1404', 'E1410', 'E1412', 'E1413', 'E1414', 'E1420', 'E1422', 'E1440', 'E1442', 'E1450', 'E1451', 'E1452'],
+  'Modifisert stivelse', 'marker', 'Kjemisk endret stivelse som brukes for å gi konsistens til industrimat. Typisk NOVA 4-ingrediens.',
+  ['modifisert', 'modified starch', 'modifierad', 'modificeret']);
+add([], 'Glukosesirup / maltodekstrin', 'marker', 'Industrielt fremstilt sukker fra stivelse – hever blodsukkeret raskt. Typisk NOVA 4-ingrediens.',
+  ['glukosesirup', 'glucose syrup', 'glukossirap', 'invertsukker', 'invert sugar', 'invertsocker', 'dekstrose', 'dextrose', 'maltodekstrin', 'maltodextrin', 'glukosesirap']);
+add([], 'Aroma', 'marker', 'Tilsatt aroma (også «naturlig aroma») lages industrielt for å etterligne smak. Typisk NOVA 4-ingrediens.',
+  ['aroma', 'flavouring', 'flavoring', 'smaksstoff', 'arom']);
+add([], 'Smaksforsterker / gjærekstrakt', 'marker', 'Brukes for å gi «umami» og forsterke smak i industrimat.',
+  ['gjærekstrakt', 'yeast extract', 'jästextrakt', 'gærekstrakt', 'smaksforsterker', 'flavour enhancer', 'flavor enhancer', 'smakförstärkare', 'smagsforstærker']);
+add([], 'Hydrolysert protein', 'marker', 'Protein som er brutt ned industrielt – brukes som smaksforsterker. Typisk NOVA 4-ingrediens.',
+  ['hydrolysert', 'hydrolysed', 'hydrolyzed', 'hydrolyserat', 'hydrolyseret']);
+add([], 'Proteinisolat', 'marker', 'Industrielt isolert protein (f.eks. soya- eller myseproteinisolat). Typisk NOVA 4-ingrediens.',
+  ['isolat', 'isolate']);
+add([], 'Interesterifisert fett', 'marker', 'Fett som er kjemisk omstrukturert i fabrikk.', ['interesterifisert', 'interesterified', 'omestret', 'omförestrad', 'omestrad']);
+add([], 'Palmeolje', 'marker', 'Raffinert fett som er vanlig i ultraprosessert mat; høyt innhold av mettet fett.',
+  ['palmeolje', 'palmolje', 'palmolja', 'palmeolie', 'palm oil', 'palmefett', 'palmfett', 'palmekjerne', 'palmkärn', 'palm kernel', 'palm fat']);
+add(['E420', 'E421', 'E953', 'E965', 'E966', 'E967'], 'Sukkeralkoholer', 'marker', 'Søtstoff typisk for «sukkerfrie» industriprodukter. Kan gi mageplager i større mengder.',
+  ['sorbitol', 'maltitol', 'xylitol', 'isomalt', 'mannitol', 'laktitol', 'lactitol']);
+add(['E960'], 'Steviolglykosider', 'marker', 'Søtstoff – tilsatte søtstoffer er et kjennetegn på ultraprosessert mat.', ['steviol']);
+add(range(200, 203), 'Sorbater', 'marker', 'Konserveringsmiddel. Regnes som relativt trygt, men er en markør for industriell bearbeiding.', ['sorbat', 'sorbinsyre', 'sorbic', 'sorbinsyra']);
+add(['E385'], 'EDTA', 'marker', 'Syntetisk kompleksbinder som brukes for å forlenge holdbarhet.', ['edta']);
+add(['E476'], 'PGPR (polyglyserol-polyrisinoleat)', 'marker', 'Billig emulgator som erstatter kakaosmør i sjokolade.', ['polyglyserol', 'polyglycerol', 'pgpr', 'polyricinoleat', 'polyrisinoleat']);
+add([...range(472, 475).map(c => c), 'E472A', 'E472B', 'E472C', 'E472D', 'E472E', 'E472F', ...range(491, 495), 'E477'], 'Syntetiske emulgatorer', 'marker',
+  'Industrielle emulgatorer som brukes for å gi konsistens og holdbarhet. Typisk NOVA 4-ingrediens.', ['datem', 'sukroseester', 'sucrose ester', 'sorbitan']);
+add(['E460', 'E461', 'E463', 'E464', 'E465', 'E468', 'E469'], 'Modifisert cellulose', 'marker', 'Kjemisk bearbeidet cellulose brukt som fortykningsmiddel.', ['metylcellulose', 'methylcellulose', 'hydroksypropyl', 'hydroxypropyl']);
+add(['E410', 'E412', 'E414', 'E415', 'E417', 'E418'], 'Fortykningsmidler (gummi)', 'marker', 'Kosmetiske tilsetningsstoffer for konsistens – regnes som trygge, men er et tegn på ultraprosessert mat.',
+  ['xantan', 'xanthan', 'guarkjernemel', 'guar gum', 'guargummi', 'johannesbrødkjernemel', 'locust bean', 'gummi arabicum', 'gum arabic', 'gellan', 'tarakjernemel']);
+add(['E1520'], 'Propylenglykol', 'marker', 'Syntetisk løsemiddel/fuktighetsbevarende middel.', ['propylenglykol', 'propylene glycol']);
+add(['E900'], 'Dimetylpolysiloksan', 'marker', 'Silikonbasert skumdemper brukt i frityrolje og industrimat.', ['dimetylpolysiloksan', 'dimethylpolysiloxane', 'dimetylpolysiloxan']);
+add([], 'Kunstige ingredienser', 'marker', 'Merket som kunstig/syntetisk.', ['kunstig', 'artificial', 'syntetisk', 'konstgjord']);
+
+// ---------- Ufarlige ----------
+add(['E100', 'E101', 'E140', 'E141', 'E160A', 'E160B', 'E160C', 'E160D', 'E161B', 'E162', 'E163', 'E170', 'E260', 'E261', 'E262', 'E263',
+  'E270', 'E280', 'E281', 'E282', 'E290', 'E296', 'E297', 'E300', 'E301', 'E302', 'E304', 'E306', 'E307', 'E308', 'E309', 'E322',
+  'E325', 'E326', 'E327', 'E330', 'E331', 'E332', 'E333', 'E334', 'E335', 'E336', 'E401', 'E402', 'E406', 'E440', 'E500', 'E501',
+  'E503', 'E504', 'E509', 'E516', 'E524', 'E525', 'E526', 'E527', 'E575', 'E941', 'E948', 'E938', 'E939'],
+  'Ufarlig tilsetningsstoff', 'safe', 'Regnes som trygt – ofte et naturlig stoff (f.eks. C-vitamin, sitronsyre, pektin, lecitin, natron).');
+
+const SAFE_NAMES = {
+  E100: 'Kurkumin', E101: 'Riboflavin', E140: 'Klorofyll', E141: 'Kobberklorofyll', E160A: 'Betakaroten', E160B: 'Annatto', E160C: 'Paprikaekstrakt',
+  E160D: 'Lykopen', E162: 'Rødbetrødt', E163: 'Antocyaner', E170: 'Kalsiumkarbonat', E260: 'Eddiksyre', E270: 'Melkesyre', E290: 'Karbondioksid',
+  E300: 'Askorbinsyre (C-vitamin)', E301: 'Natriumaskorbat', E306: 'Tokoferoler (E-vitamin)', E307: 'Tokoferol', E322: 'Lecitin', E330: 'Sitronsyre',
+  E331: 'Natriumsitrat', E332: 'Kaliumsitrat', E333: 'Kalsiumsitrat', E334: 'Vinsyre', E406: 'Agar', E440: 'Pektin', E500: 'Natron/natriumkarbonat',
+  E501: 'Kaliumkarbonat', E503: 'Hjortetakksalt', E509: 'Kalsiumklorid', E516: 'Kalsiumsulfat', E941: 'Nitrogen', E948: 'Oksygen',
+};
+
+const NAME_RULES = GROUPS
+  .filter(g => g.terms.length)
+  .map(g => ({
+    group: g,
+    regexes: g.terms.map(t => {
+      const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return t.length < 5 ? new RegExp('(^|[^a-zæøåäöü])' + esc + '($|[^a-zæøåäöü])') : new RegExp(esc);
+    }),
+  }));
+
+const CLASS_WORDS = new RegExp('^(' + [
+  'emulgator(er)?', 'emulsifiers?', 'emulgeringsmid(del|ler)', 'konserveringsmid(del|ler)', 'konserveringsmedel', 'preservatives?',
+  'antioksidant(er)?', 'antioxidant(s|er)?', 'fargestoff(er)?', 'färgämne(n)?', 'farvestof(fer)?', 'colou?rs?', 'stabilisator(er)?',
+  'stabili[sz]ers?', 'stabiliseringsmid(del|ler)', 'fortykningsmid(del|ler)', 'förtjockningsmedel', 'fortykningsmiddel', 'thickeners?',
+  'surhetsregulerende mid(del|ler)', 'surhetsregulator(er)?', 'surhetsreglerande medel', 'syreregulerende mid(del|ler)', 'acidity regulators?',
+  'syre', 'syrer', 'syra', 'syrningsmid(del|ler)', 'syrningsmedel', 'acids?', 'hevemid(del|ler)', 'bakpulver', 'jäsmedel', 'hævemiddel',
+  'raising agents?', 'søtstoff(er)?', 'sötningsmedel', 'sødemiddel', 'sweeteners?', 'smaksforsterker(e)?', 'smakförstärkare',
+  'flavou?r enhancers?', 'fuktighetsbevarende mid(del|ler)', 'humectants?', 'melbehandlingsmid(del|ler)', 'mjölbehandlingsmedel',
+  'glasurmid(del|ler)', 'glazing agents?', 'ytbehandlingsmedel', 'geleringsmid(del|ler)', 'gelling agents?', 'antiklumpemid(del|ler)',
+  'klumpförebyggande medel', 'anti-?caking agents?', 'konsistensmid(del|ler)', 'skumdemper(e)?', 'kompleksbinder(e)?', 'emulgeringsmedel',
+].join('|') + ')$', 'i');
+
+function fixOcrENumbers(text) {
+  return text.replace(/\b([eE])\s?[-–]?\s?([0-9OoIl|]{3,4})([a-dA-D])?\b/g, (m, e, digits, suf) => {
+    if (!/\d/.test(digits)) return m;
+    return 'E' + digits.replace(/[Oo]/g, '0').replace(/[Il|]/g, '1') + (suf || '');
+  });
+}
+
+function cleanText(raw) {
+  let t = String(raw || '').replace(/\r/g, '\n').replace(/([a-zæøåäö])-[ \t]*\n\s*([a-zæøåäö])/gi, '$1$2');
+  t = t.replace(/[\n\t]+/g, ' ').replace(/\s+/g, ' ');
+  const start = t.match(/\b(ingredienser|ingredients|ingrediser|ingrediens|zutaten|ainesosat)\b\s*:?/i);
+  if (start) t = t.slice(start.index + start[0].length);
+  const end = t.search(/\b(næringsinnhold|næringsdeklarasjon|näringsvärde|næringsindhold|nutrition|näringsinnehåll|oppbevar|förvar|opbevar|best før|bäst före|holdbar|kan inneholde spor|kan inneholde|kan innehålla|netto)/i);
+  if (end > 15) t = t.slice(0, end);
+  return fixOcrENumbers(t).trim();
+}
+
+function splitTop(s) {
+  const out = [];
+  let depth = 0, cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i], prev = s[i - 1] || '', next = s[i + 1] || '';
+    if ('([{'.includes(c)) depth++;
+    if (')]}'.includes(c)) depth = Math.max(0, depth - 1);
+    const sep = depth === 0 && (
+      c === ';' || c === '•' ||
+      (c === ',' && !(/\d/.test(prev) && /\d/.test(next))) ||
+      (c === '.' && !(/\d/.test(prev) && /\d/.test(next)))
+    );
+    if (sep) { out.push(cur); cur = ''; } else cur += c;
+  }
+  out.push(cur);
+  return out.map(x => x.trim()).filter(Boolean);
+}
+
+function isClassWord(s) {
+  return CLASS_WORDS.test(s.replace(/[:\s]+$/, '').trim());
+}
+
+function expand(item, depth = 0) {
+  item = item.replace(/^[\s\-–•*:,.]+|[\s.:;,*]+$/g, '').replace(/^(og|and|och)\s+/i, '').trim();
+  if (!item || item.length < 2 || /^[\d\s,.%]+$/.test(item)) return [];
+  if (depth > 3) return [item];
+
+  const colon = item.match(/^([^:()]{2,50}):\s*(.+)$/);
+  if (colon && isClassWord(colon[1])) return splitTop(colon[2]).flatMap(x => expand(x, depth + 1));
+
+  const p = item.match(/^([^(\[]*)[(\[](.*)[)\]][^)\]]*$/);
+  if (p) {
+    const outer = p[1].trim(), inner = p[2].trim();
+    const parts = splitTop(inner);
+    if (isClassWord(outer)) return parts.flatMap(x => expand(x, depth + 1));
+    if (parts.length > 1) return parts.flatMap(x => expand(x, depth + 1));
+  }
+  if (isClassWord(item)) return [];
+  return [item];
+}
+
+function lookupCode(code) {
+  code = code.toUpperCase();
+  return ADDITIVES[code] || ADDITIVES[code.replace(/[A-Z]+$/, '').replace(/^(\d)/, 'E$1')] || null;
+}
+
+function analyzeItem(text, source = 'text') {
+  const norm = text.toLowerCase();
+  const hits = [];
+  const seen = new Set();
+  const push = (group, code) => {
+    if (seen.has(group.id)) return;
+    seen.add(group.id);
+    hits.push({ group, code });
+  };
+
+  for (const m of norm.matchAll(/(^|[^a-zæøå])e(\d{3,4})([a-d])?(?![a-zæøå0-9])/g)) {
+    const code = 'E' + m[2] + (m[3] || '').toUpperCase();
+    const g = lookupCode(code);
+    if (g) push(g, code);
+    else push({ id: 'unk-' + code, codes: [code], name: 'Tilsetningsstoff', level: 'neutral', why: 'Står ikke på listen over betenkelige stoffer.' }, code);
+  }
+  for (const rule of NAME_RULES) {
+    if (rule.regexes.some(r => r.test(norm))) push(rule.group, null);
+  }
+
+  hits.sort((a, b) => LEVELS[b.group.level].rank - LEVELS[a.group.level].rank);
+  const level = hits.length ? hits[0].group.level : 'none';
+  return { text, hits, level, source };
+}
+
+function offTagToCode(tag) {
+  const m = String(tag).match(/e(\d{3,4})([a-d])?/i);
+  return m ? 'E' + m[1] + (m[2] || '').toUpperCase() : null;
+}
+
+function estimateNova(items) {
+  const hasUpf = items.some(i => i.hits.some(h => ['high', 'moderate', 'marker'].includes(h.group.level)));
+  if (hasUpf) return 4;
+  const hasAdditive = items.some(i => i.hits.length);
+  if (items.length <= 1 && !hasAdditive) return 1;
+  return 3;
+}
+
+function analyzeProduct(rawText, offAdditiveTags = [], offNova = null) {
+  const cleaned = cleanText(rawText);
+  const items = cleaned ? splitTop(cleaned).flatMap(x => expand(x)).map(t => analyzeItem(t)) : [];
+
+  const foundGroups = new Set(items.flatMap(i => i.hits.map(h => h.group.id)));
+  for (const tag of offAdditiveTags) {
+    const code = offTagToCode(tag);
+    if (!code) continue;
+    const g = lookupCode(code);
+    if (!g || foundGroups.has(g.id) || !['high', 'moderate', 'marker'].includes(g.level)) continue;
+    foundGroups.add(g.id);
+    items.push({ text: `${g.name} (${code})`, hits: [{ group: g, code }], level: g.level, source: 'off' });
+  }
+
+  const count = lvl => items.filter(i => i.level === lvl).length;
+  const counts = { high: count('high'), moderate: count('moderate'), marker: count('marker'), safe: count('safe'), neutral: count('neutral') };
+  const harmful = counts.high + counts.moderate;
+  const total = items.length;
+  const estimated = estimateNova(items);
+  const nova = offNova ? Number(offNova) : estimated;
+  const score = Math.max(0, Math.round(100 - counts.high * 25 - counts.moderate * 12 - counts.marker * 6 - (nova === 4 ? 10 : 0)));
+
+  let verdict;
+  if (nova === 4 && harmful > 0) verdict = { level: 'high', text: 'Ultraprosessert med skadelige stoffer' };
+  else if (nova === 4) verdict = { level: 'moderate', text: 'Ultraprosessert' };
+  else if (nova === 3) verdict = { level: 'marker', text: 'Bearbeidet' };
+  else verdict = { level: 'safe', text: 'Lite bearbeidet' };
+
+  return { items, counts, harmful, total, nova, novaSource: offNova ? 'off' : 'estimat', score, verdict, cleaned };
+}
+
+if (typeof module !== 'undefined') module.exports = { analyzeProduct, cleanText, splitTop, expand, analyzeItem, LEVELS, SAFE_NAMES };
+</script>
+
+<!-- Brukergrensesnitt -->
+<script>
+const $ = s => document.querySelector(s);
+const statusEl = $('#status');
+const resultEl = $('#result');
+const HISTORY_KEY = 'matskanner-historikk';
+let scanner = null;
+let scanning = false;
+
+function setStatus(msg, error = false) {
+  statusEl.textContent = msg || '';
+  statusEl.classList.toggle('error', error);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------- Faner ----------
+document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  if (name !== 'barcode') stopCamera();
+}
+
+// ---------- Strekkode ----------
+function barcodeFormats() {
+  const F = window.Html5QrcodeSupportedFormats;
+  return [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF];
+}
+
+function newScanner(id) {
+  return new Html5Qrcode(id, {
+    formatsToSupport: barcodeFormats(),
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    verbose: false,
+  });
+}
+
+$('#btnCamera').addEventListener('click', async () => {
+  if (scanning) return stopCamera();
+  if (!window.Html5Qrcode) return setStatus('Strekkodeleseren lastes fortsatt – prøv igjen om et øyeblikk.', true);
+  try {
+    scanner = scanner || newScanner('reader');
+    $('#reader').classList.add('on');
+    await scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 12,
+        qrbox: (w, h) => ({ width: Math.floor(Math.min(w * 0.9, 360)), height: Math.floor(Math.min(h * 0.45, 170)) }),
+        aspectRatio: 1.333,
+      },
+      code => { stopCamera(); navigator.vibrate?.(80); lookupBarcode(code); },
+      () => {}
+    );
+    scanning = true;
+    $('#btnCamera').textContent = 'Stopp kamera';
+    setStatus('Hold strekkoden inne i rammen…');
+  } catch (err) {
+    $('#reader').classList.remove('on');
+    setStatus('Fikk ikke tilgang til kameraet. Siden må åpnes via https (eller localhost), og du må gi tillatelse. Du kan også bruke «Ta bilde av strekkoden».', true);
+  }
+});
+
+async function stopCamera() {
+  if (scanner && scanning) {
+    try { await scanner.stop(); } catch (_) {}
+  }
+  scanning = false;
+  $('#reader').classList.remove('on');
+  $('#btnCamera').textContent = 'Start kamera og scan strekkode';
+}
+
+$('#barcodeFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!window.Html5Qrcode) return setStatus('Strekkodeleseren lastes fortsatt – prøv igjen.', true);
+  setStatus('Leter etter strekkode i bildet…');
+  try {
+    const code = await newScanner('hidden-reader').scanFile(file, false);
+    lookupBarcode(code);
+  } catch (_) {
+    setStatus('Fant ingen strekkode i bildet. Prøv igjen nærmere og med godt lys, eller skriv inn tallene.', true);
+  }
+});
+
+$('#manualForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const code = $('#manualCode').value.replace(/\D/g, '');
+  if (code.length < 6) return setStatus('Skriv inn hele strekkoden (8–13 siffer).', true);
+  lookupBarcode(code);
+});
+
+async function lookupBarcode(code) {
+  setStatus(`Slår opp ${code}…`);
+  const fields = 'product_name,product_name_no,product_name_nb,brands,image_front_small_url,ingredients_text,ingredients_text_no,ingredients_text_nb,ingredients_text_nn,ingredients_text_en,ingredients_text_sv,ingredients_text_da,additives_tags,nova_group';
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${fields}`);
+    const data = await res.json();
+    const p = data.product;
+    if (!p || data.status === 0) {
+      setStatus('Produktet finnes ikke i databasen. Ta bilde av innholdslisten i stedet.', true);
+      return switchTab('label');
+    }
+    const text = p.ingredients_text_no || p.ingredients_text_nb || p.ingredients_text_nn || p.ingredients_text ||
+                 p.ingredients_text_sv || p.ingredients_text_da || p.ingredients_text_en || '';
+    const additives = p.additives_tags || [];
+    if (!text && !additives.length) {
+      setStatus('Produktet ble funnet, men mangler innholdsliste. Ta bilde av innholdslisten.', true);
+      return switchTab('label');
+    }
+    const product = {
+      code,
+      name: p.product_name_no || p.product_name_nb || p.product_name || 'Ukjent produkt',
+      brand: (p.brands || '').split(',')[0],
+      image: p.image_front_small_url || '',
+    };
+    setStatus('');
+    showResult({ product, text, additives, nova: p.nova_group || null });
+  } catch (err) {
+    setStatus('Klarte ikke å kontakte produktdatabasen. Sjekk nettforbindelsen.', true);
+  }
+}
+
+// ---------- Innholdsliste (OCR) ----------
+$('#labelFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const preview = $('#preview');
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+  if (!window.Tesseract) return setStatus('Tekstgjenkjenning lastes fortsatt – prøv igjen om et øyeblikk.', true);
+
+  const bar = $('#ocrProgress');
+  bar.style.display = 'block';
+  bar.firstElementChild.style.width = '0%';
+  setStatus('Leser teksten i bildet… (første gang lastes språkdata, det kan ta litt tid)');
+  $('#btnAnalyze').disabled = true;
+  try {
+    const img = await preprocess(file);
+    const { data } = await Tesseract.recognize(img, 'nor+eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') bar.firstElementChild.style.width = Math.round(m.progress * 100) + '%';
+      },
+    });
+    $('#ingredientText').value = data.text.trim();
+    setStatus('Ferdig! Sjekk teksten og trykk «Analyser».');
+    if (data.text.trim().length > 10) analyzeLabel();
+  } catch (err) {
+    setStatus('Klarte ikke å lese teksten. Prøv et skarpere bilde, eller skriv inn innholdslisten.', true);
+  } finally {
+    bar.style.display = 'none';
+    $('#btnAnalyze').disabled = false;
+  }
+});
+
+function preprocess(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 2200;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const px = d.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        const v = Math.max(0, Math.min(255, (g - 128) * 1.5 + 128));
+        px[i] = px[i + 1] = px[i + 2] = v;
+      }
+      ctx.putImageData(d, 0, 0);
+      resolve(canvas);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+$('#btnAnalyze').addEventListener('click', analyzeLabel);
+function analyzeLabel() {
+  const text = $('#ingredientText').value.trim();
+  if (text.length < 3) return setStatus('Ta et bilde eller skriv inn innholdslisten først.', true);
+  setStatus('');
+  showResult({ product: { name: 'Fotografert innholdsliste', brand: '', image: '', code: '' }, text, additives: [], nova: null });
+}
+
+// ---------- Resultat ----------
+function showResult(entry, save = true) {
+  const r = analyzeProduct(entry.text, entry.additives, entry.nova);
+  if (!r.total) {
+    setStatus('Fant ingen ingredienser i teksten. Prøv et tydeligere bilde.', true);
+    return;
+  }
+  if (save) saveHistory(entry, r);
+
+  const ratio = r.total ? r.harmful / r.total : 0;
+  const ringColor = r.harmful === 0 ? 'var(--safe)' : ratio >= 0.25 || r.counts.high ? 'var(--high)' : 'var(--moderate)';
+  const C = 2 * Math.PI * 56;
+
+  const flagged = [];
+  const seen = new Set();
+  for (const it of r.items) for (const h of it.hits) {
+    if (!['high', 'moderate', 'marker'].includes(h.group.level) || seen.has(h.group.id)) continue;
+    seen.add(h.group.id);
+    flagged.push(h);
+  }
+  flagged.sort((a, b) => LEVELS[b.group.level].rank - LEVELS[a.group.level].rank);
+
+  const p = entry.product;
+  resultEl.innerHTML = `
+    <div class="product">
+      ${p.image ? `<img src="${esc(p.image)}" alt="">` : ''}
+      <div>
+        <h2>${esc(p.name)}</h2>
+        <small>${esc([p.brand, p.code].filter(Boolean).join(' · '))}</small>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="ring">
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <circle cx="66" cy="66" r="56" fill="none" stroke="#e2e8f0" stroke-width="12"/>
+          <circle cx="66" cy="66" r="56" fill="none" stroke="${ringColor}" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - Math.max(ratio, r.harmful ? 0.03 : 0))}"/>
+        </svg>
+        <div class="num"><b style="color:${ringColor}">${r.harmful}</b><span>av ${r.total} er<br>skadelige</span></div>
+      </div>
+      <div>
+        <span class="verdict lvl-${r.verdict.level}">${esc(r.verdict.text)}</span>
+        <div class="meta">NOVA-gruppe: <b>${r.nova}</b> <span class="src">(${r.novaSource === 'off' ? 'Open Food Facts' : 'estimert'})</span></div>
+        <div class="meta">Helsescore: <b>${r.score}/100</b></div>
+      </div>
+    </div>
+
+    <div class="chips">
+      ${r.counts.high ? `<span class="chip lvl-high">${r.counts.high} skadelig${r.counts.high > 1 ? 'e' : ''}</span>` : ''}
+      ${r.counts.moderate ? `<span class="chip lvl-moderate">${r.counts.moderate} betenkelig${r.counts.moderate > 1 ? 'e' : ''}</span>` : ''}
+      ${r.counts.marker ? `<span class="chip lvl-marker">${r.counts.marker} ultraprosessert-markør${r.counts.marker > 1 ? 'er' : ''}</span>` : ''}
+      ${r.counts.safe ? `<span class="chip lvl-safe">${r.counts.safe} ufarlig${r.counts.safe > 1 ? 'e' : ''} tilsetning${r.counts.safe > 1 ? 'er' : ''}</span>` : ''}
+    </div>
+
+    ${flagged.length ? `
+      <h3 style="margin-top:22px">Derfor er det flagget</h3>
+      <ul class="ing">
+        ${flagged.map(h => `
+          <li class="lvl-${h.group.level}">
+            <div class="top"><span class="name">${esc(h.group.name)}${h.code ? ` <span class="src">${esc(h.code)}</span>` : ''}</span>
+            <span class="tag">${LEVELS[h.group.level].label}</span></div>
+            <div class="why">${esc(h.group.why)}</div>
+          </li>`).join('')}
+      </ul>` : `<p style="margin-top:18px">Ingen skadelige stoffer eller tegn på ultraprosessering funnet.</p>`}
+
+    <h3 style="margin-top:22px">Alle ingredienser (${r.total})</h3>
+    <ul class="ing">
+      ${r.items.map(it => {
+        const h = it.hits[0];
+        const label = it.level === 'none' ? '' : (it.level === 'safe' && h.code && SAFE_NAMES[h.code.toUpperCase()]) ? SAFE_NAMES[h.code.toUpperCase()] : LEVELS[it.level].label;
+        return `
+        <li class="lvl-${it.level}">
+          <div class="top"><span class="name">${esc(it.text)}</span>${label ? `<span class="tag">${esc(label)}</span>` : ''}</div>
+          ${it.source === 'off' ? `<div class="src">Fra Open Food Facts – ikke funnet i teksten</div>` : ''}
+        </li>`;
+      }).join('')}
+    </ul>
+  `;
+  resultEl.style.display = 'block';
+  resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------- Historikk ----------
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch (_) { return []; }
+}
+
+function saveHistory(entry, r) {
+  const list = loadHistory().filter(h => !(entry.product.code && h.product.code === entry.product.code));
+  list.unshift({ ...entry, harmful: r.harmful, total: r.total, nova: entry.nova, verdict: r.verdict, ts: Date.now() });
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 25)));
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  $('#historyCard').style.display = list.length ? 'block' : 'none';
+  $('#history').innerHTML = list.map((h, i) => `
+    <li data-i="${i}">
+      <div>
+        <div class="h-name">${esc(h.product.name)}</div>
+        <div class="h-sub">${new Date(h.ts).toLocaleDateString('no-NO')} · ${esc(h.verdict.text)}</div>
+      </div>
+      <span class="chip lvl-${h.harmful ? (h.verdict.level === 'high' ? 'high' : 'moderate') : 'safe'}">${h.harmful}/${h.total}</span>
+    </li>`).join('');
+}
+
+$('#history').addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (!li) return;
+  const h = loadHistory()[Number(li.dataset.i)];
+  if (h) showResult(h, false);
+});
+
+$('#btnClear').addEventListener('click', () => {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+});
+
+renderHistory();
+</script>
+</body>
+</html>
