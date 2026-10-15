@@ -1,0 +1,78 @@
+name: Publish GitHub Pages
+
+# The search fix is already on main. A Pages deployment can stay "in progress"
+# after a failed run and then block every later publish, so the live site keeps
+# serving the previous commit. This workflow checks the search call the browser
+# makes, then asks Pages to drop that stuck deployment and build again.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit tests
+        run: node --test test/search-url.test.js
+      - name: Browser-equivalent search probe
+        run: node script/probe-search.js
+
+  unblock:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear a stuck Pages deployment and confirm the site updated
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cancel() {
+            local id="$1"
+            echo "cancel ${id}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/deployments/${id}/cancel" || true
+          }
+          # These commits reached Pages, but fe9fe5e never left "in progress"
+          # and every later deploy was rejected until it is cancelled.
+          cancel fe9fe5e646c4955c933db1814291d5ccdd89d605
+          cancel 3f42909a2238b060fd3aeec48a087bab36166e31
+          cancel b9cf2e2af59288c381282167bd38da6f0b4b0e11
+
+          live() {
+            local html
+            html=$(curl -fsS --max-time 25 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              "https://mariamisjelm.github.io/matscanner/?ts=$(date +%s)" || true)
+            printf '%s' "$html" | grep -q 'search.openfoodfacts.org/search'
+          }
+
+          for _ in 1 2 3 4; do
+            if live; then
+              echo "site is serving the search fix"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "requesting a fresh Pages build"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/builds" || true
+
+          for _ in 1 2 3 4 5 6 7 8; do
+            if live; then
+              echo "site is serving the search fix"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "the live site still does not contain the search fix"
+          gh api "repos/${GITHUB_REPOSITORY}/pages" || true
+          gh api "repos/${GITHUB_REPOSITORY}/pages/builds?per_page=3" || true
+          exit 1
