@@ -2375,9 +2375,14 @@ const TESS_CORE = CDN + 'tesseract.js-core@7.0.0';
 const OCR_LANGS = 'nor+swe+dan';
 const OFF_HOST = 'https://world.openfoodfacts.org';
 const OFF_API = OFF_HOST + '/api/v2/product/';
-const OFF_SEARCH = OFF_HOST + '/api/v2/search';
-const OFF_TEXT_SEARCH = OFF_HOST + '/cgi/search.pl';
-const LIST_FIELDS = 'code,product_name,product_name_no,product_name_nb,brands,image_front_small_url,nova_group,nutriscore_grade,nutriments,additives_n,ingredients_n';
+// Frittekst- og kategorisøk går til Search-a-licious. /cgi/search.pl og /api/v2/search
+// på world.openfoodfacts.org deler én nginx-grense på 600 søk i minuttet for alle
+// anonyme kall. Når grensen er nådd, svarer nginx 503 uten CORS-headere. Nettleseren
+// kaster da feilen, og appen viser at kontakten med databasen feilet.
+const OFF_FULLTEXT = 'https://search.openfoodfacts.org/search';
+const SEARCH_LANGS = 'no,nb,nn,da,sv,en';
+const SEARCH_LIST_FIELDS = 'code,product_name,product_name_no,product_name_nb,product_name_nn,product_name_en,brands,image_front_small_url,nova_group,nutriscore_grade';
+const ALT_FIELDS = SEARCH_LIST_FIELDS + ',additives_n,ingredients_n,nutriments';
 const OFF_FIELDS = ['code', 'product_name', 'product_name_no', 'product_name_nb', 'product_name_nn', 'product_name_sv', 'product_name_da', 'product_name_en',
   'generic_name', 'brands', 'lang', 'ingredients_lc', 'image_front_small_url', 'image_front_url', 'image_ingredients_url', 'image_ingredients_small_url',
   'ingredients_text', ...OFF_LANGS.map(l => 'ingredients_text_' + l), 'ingredients', 'additives_tags', 'nova_group', 'nova_groups_markers',
@@ -3819,6 +3824,46 @@ resultEl.addEventListener('click', e => {
   }
 });
 
+// ---------- Søk mot Search-a-licious ----------
+// TEST_EXPORT_START
+function searchTerms(q) {
+  return String(q || '').replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function quoteTag(tag) {
+  return '"' + String(tag).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function brandText(brands) {
+  const list = Array.isArray(brands) ? brands
+    : brands && typeof brands === 'object' ? Object.values(brands).flat()
+    : String(brands || '').split(',');
+  return list.map(b => {
+    const s = String(b).trim();
+    return /^[a-z]{2}:/.test(s) ? s.replace(/^[a-z]{2}:/, '').replace(/-/g, ' ') : s;
+  }).filter(Boolean).join(', ');
+}
+
+function fulltextSearchUrl(q, opts = {}) {
+  const params = new URLSearchParams({
+    q,
+    page_size: String(opts.pageSize || 24),
+    langs: SEARCH_LANGS,
+    fields: opts.fields || SEARCH_LIST_FIELDS,
+  });
+  return OFF_FULLTEXT + '?' + params.toString();
+}
+
+function searchHitProduct(hit) {
+  if (!hit || typeof hit !== 'object') return null;
+  return { ...hit, brands: brandText(hit.brands) };
+}
+
+function norwayQuery(text) {
+  return `${text} countries:${quoteTag('en:norway')}`.trim();
+}
+// TEST_EXPORT_END
+
 // ---------- Bedre alternativ ----------
 function listName(p) {
   return productName(p) || 'Uten navn';
@@ -3837,9 +3882,9 @@ async function findAlternatives(entry, r, button) {
   try {
     const pool = [];
     for (const cat of cats) {
-      const url = `${OFF_SEARCH}?categories_tags=${encodeURIComponent(cat)}&countries_tags=en:norway&fields=${LIST_FIELDS}&page_size=50&sort_by=popularity_key`;
+      const url = fulltextSearchUrl(`categories:${quoteTag(cat)} countries:${quoteTag('en:norway')}`, { pageSize: 40, fields: ALT_FIELDS });
       const data = await offJson(url, ctrl.signal);
-      pool.push(...((data && data.products) || []));
+      pool.push(...((data && data.hits) || []).map(searchHitProduct).filter(Boolean));
       found = pickAlternatives(current, pool);
       if (found.length >= 3) break;
     }
@@ -3880,19 +3925,25 @@ $('#searchForm').addEventListener('submit', async e => {
   const seq = ++searchSeq;
   $('#searchInput').blur();
   list.innerHTML = '<li class="empty busy">Søker …</li>';
+  const text = searchTerms(q);
+  if (text.length < 2) {
+    list.innerHTML = '<li class="empty">Fant ingen varer. Prøv et annet ord, eller skann strekkoden.</li>';
+    return;
+  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
-  const base = `${OFF_TEXT_SEARCH}?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&fields=${LIST_FIELDS}`;
+  const usable = data => ((data && data.hits) || []).map(searchHitProduct).filter(p => p && p.code && productName(p));
   let products = [];
+  let norwayError = null;
   try {
-    const no = await offJson(base + '&tagtype_0=countries&tag_contains_0=contains&tag_0=norway', ctrl.signal);
-    products = (no && no.products) || [];
-    if (!products.length) {
-      const all = await offJson(base, ctrl.signal);
-      products = (all && all.products) || [];
+    try {
+      products = usable(await offJson(fulltextSearchUrl(norwayQuery(text)), ctrl.signal));
+    } catch (err) {
+      norwayError = err;
     }
+    if (!products.length) products = usable(await offJson(fulltextSearchUrl(text), ctrl.signal));
   } catch (err) {
-    if (seq === searchSeq) list.innerHTML = `<li class="empty">${esc(offErrorText(err))}</li>`;
+    if (!products.length && seq === searchSeq) list.innerHTML = `<li class="empty">${esc(offErrorText(norwayError || err))}</li>`;
     return;
   } finally {
     clearTimeout(timer);
