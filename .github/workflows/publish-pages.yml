@@ -1,0 +1,111 @@
+name: Publish GitHub Pages
+
+# The live site is whatever Pages last finished building. This workflow
+# checks that page, and when it is still the old search it removes failed
+# deployment records and asks for one new build.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-pages
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      live: ${{ steps.check.outputs.live }}
+    steps:
+      - id: check
+        run: |
+          html=$(curl -fsS --max-time 25 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            "https://mariamisjelm.github.io/matscanner/?ts=$(date +%s)" || true)
+          if printf '%s' "$html" | grep -q 'search.openfoodfacts.org/search'; then
+            echo "live=true" >> "$GITHUB_OUTPUT"
+            echo "site already serves the search fix"
+          else
+            echo "live=false" >> "$GITHUB_OUTPUT"
+            echo "site does not serve the search fix yet"
+          fi
+
+  verify:
+    needs: site
+    if: needs.site.outputs.live != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit tests
+        run: node --test test/search-url.test.js test/probe-search.test.js
+      - name: Browser-equivalent search probe
+        run: node script/probe-search.js
+
+  unblock:
+    needs: [site, verify]
+    if: needs.site.outputs.live != 'true' && needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pages: write
+    steps:
+      - name: Remove failed deployment records and request one Pages build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "pages deployment fe9fe5e646c4955c933db1814291d5ccdd89d605 before:"
+          gh api "repos/${GITHUB_REPOSITORY}/pages/deployments/fe9fe5e646c4955c933db1814291d5ccdd89d605" || true
+
+          # The timed-out Pages run already called the Pages cancel endpoint.
+          # Later creates were still rejected, so this job does not call it again.
+          # It deletes failed github-pages deployment records instead, and leaves
+          # any deployment whose latest status is success in place.
+          gh api "repos/${GITHUB_REPOSITORY}/deployments?environment=github-pages&per_page=30" \
+            --jq '.[] | "\(.id) \(.sha)"' | while read -r id sha; do
+              [ -n "${id:-}" ] || continue
+              state=$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${id}/statuses" --jq '.[0].state // "none"')
+              echo "deployment ${id} ${sha} ${state}"
+              if [ "$state" = "success" ]; then
+                continue
+              fi
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/deployments/${id}/statuses" \
+                -f state=inactive \
+                -f description="Remove failed Pages deployment" || echo "could not mark ${id} inactive"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/deployments/${id}" || echo "could not delete ${id}"
+          done
+
+          echo "pages deployment fe9fe5e646c4955c933db1814291d5ccdd89d605 after:"
+          gh api "repos/${GITHUB_REPOSITORY}/pages/deployments/fe9fe5e646c4955c933db1814291d5ccdd89d605" || true
+
+          echo "requesting one Pages build"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/builds" || echo "pages build request failed"
+
+          live() {
+            local html
+            html=$(curl -fsS --max-time 25 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              "https://mariamisjelm.github.io/matscanner/?ts=$(date +%s)" || true)
+            printf '%s' "$html" | grep -q 'search.openfoodfacts.org/search'
+          }
+
+          for _ in 1 2 3 4 5 6 7 8; do
+            if live; then
+              echo "site is serving the search fix"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "the live site still does not contain the search fix"
+          gh api "repos/${GITHUB_REPOSITORY}/pages" || true
+          gh api "repos/${GITHUB_REPOSITORY}/pages/builds?per_page=3" || true
+          exit 1
