@@ -1,0 +1,17 @@
+---
+description: Independent senior review before any further Matskanner change is published
+alwaysApply: true
+---
+
+# independent-senior-review
+
+Use this on every further change that builds Matskanner: UI, search, scoring, Open Food Facts calls, tests, or GitHub Pages behavior.
+
+1. Implement the change and run the tests.
+2. Start a fresh subagent that did not write the change. Use `generalPurpose` and a different model family from the author. Title the task `Independent senior review`.
+3. The reviewer is read-only. Give it the repo path, `git diff` against the last published revision, and the user-facing goal. Do not include your reasoning, suspected causes, or suggested fixes.
+4. Require a verdict of PASS or CHANGES REQUIRED. Every finding needs a file path, line numbers, and what actually happens.
+5. On CHANGES REQUIRED, fix the blocking findings and repeat the review on the new diff. Stop after two review rounds and report anything still open.
+6. Report non-blocking findings to the user. Do not silently drop them, and do not expand the change to cover them unless the user asks.
+7. Say what was not verified. This environment often cannot call Open Food Facts.
+8. Publish to `main` only after PASS, or after blocking findings are fixed and the remaining risk is stated.
