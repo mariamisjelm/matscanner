@@ -1,7 +1,7 @@
 // Checks the same Search-a-licious request the search box sends.
-// A browser only accepts the response when the preflight and the GET
-// both allow https://mariamisjelm.github.io. Node does not enforce CORS,
-// so this script checks those headers itself.
+// The page fetches with GET and Accept: application/json. That header is
+// CORS-safelisted, so the browser does not send a preflight. It still
+// requires Access-Control-Allow-Origin on the response.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -49,18 +49,17 @@ function curl(method, url) {
     '-X', method,
     '-H', 'Origin: ' + ORIGIN,
     '-H', 'Accept: application/json',
+    url,
   ];
-  if (method === 'GET') args.push('-L', '--max-redirs', '3');
-  if (method === 'OPTIONS') {
-    args.push(
-      '-H', 'Access-Control-Request-Method: GET',
-      '-H', 'Access-Control-Request-Headers: accept',
-    );
-  }
-  args.push(url);
   const result = spawnSync('curl', args, { encoding: 'utf8' });
   if (result.error || result.status !== 0) {
-    return { network: true, detail: (result.stderr || (result.error && result.error.message) || 'curl failed').trim() };
+    return {
+      network: true,
+      status: 0,
+      allowOrigin: '',
+      usable: 0,
+      detail: (result.stderr || (result.error && result.error.message) || 'curl failed').trim(),
+    };
   }
   const rawHeaders = fs.readFileSync(headerFile, 'utf8');
   const blocks = rawHeaders.split(/\r?\n\r?\n/).filter(block => /^HTTP\//.test(block));
@@ -68,10 +67,11 @@ function curl(method, url) {
   const body = fs.readFileSync(bodyFile, 'utf8');
   const status = Number((header.match(/^HTTP\/\S+\s+(\d+)/) || [])[1] || 0);
   return {
+    network: false,
     status,
     allowOrigin: headerValue(header, 'access-control-allow-origin'),
-    allowHeaders: headerValue(header, 'access-control-allow-headers'),
-    body,
+    usable: usableCount(body),
+    detail: '',
   };
 }
 
@@ -88,38 +88,30 @@ function usableCount(body) {
   )).length;
 }
 
-function corsOk(res) {
-  return res.allowOrigin === ORIGIN || res.allowOrigin === '*';
+function browserWouldShowResults(res) {
+  if (!res || res.network || res.status !== 200) return false;
+  if (res.allowOrigin !== ORIGIN && res.allowOrigin !== '*') return false;
+  return res.usable > 0;
 }
 
 function checkGet(label, url) {
   console.log(label, url);
-  const preflight = curl('OPTIONS', url);
-  const get = curl('GET', url);
-  const count = get.body ? usableCount(get.body) : 0;
-  console.log(JSON.stringify({
-    label,
-    preflightStatus: preflight.status || null,
-    preflightOrigin: preflight.allowOrigin || null,
-    preflightHeaders: preflight.allowHeaders || null,
-    preflightNetwork: !!preflight.network,
-    getStatus: get.status || null,
-    getOrigin: get.allowOrigin || null,
-    getNetwork: !!get.network,
-    usable: count,
-    detail: preflight.detail || get.detail || undefined,
-  }));
-  const preflightOk = !preflight.network && preflight.status >= 200 && preflight.status < 300
-    && corsOk(preflight) && /accept/i.test(preflight.allowHeaders || '');
-  const getOk = !get.network && get.status === 200 && corsOk(get) && count > 0;
-  return preflightOk && getOk;
+  const res = curl('GET', url);
+  console.log(JSON.stringify({ label, ...res }));
+  return res;
 }
 
-const text = 'coca cola';
-const norwayOk = checkGet('norway', searchUrl(text));
-const globalOk = norwayOk || checkGet('global', globalUrl(text));
-if (!globalOk) {
+function main() {
+  const text = 'coca cola';
+  const norway = checkGet('norway', searchUrl(text));
+  if (browserWouldShowResults(norway) || browserWouldShowResults(checkGet('global', globalUrl(text)))) {
+    console.log('probe ok');
+    return;
+  }
   console.error('search request would fail in the browser');
   process.exit(1);
 }
-console.log('probe ok');
+
+if (require.main === module) main();
+
+module.exports = { browserWouldShowResults, ORIGIN };
